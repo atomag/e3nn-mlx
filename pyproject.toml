@@ -1,0 +1,96 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name="e3nn-mlx"
+requires-python = ">=3.7"
+dynamic = ["version", "readme"]
+license = {text = "MIT"}
+description = "MLX port of e3nn: E(3) equivariant neural networks"
+classifiers = [
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.7",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX",
+  "Operating System :: MacOS",
+]
+dependencies = [
+  "sympy",
+  "scipy",
+  "mlx>=0.27.0",
+  "numpy"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pre-commit",
+]
+
+[project.urls]
+homepage = "https://e3nn.org"
+documentation = "https://docs.e3nn.org/"
+repository = "https://github.com/e3nn/e3nn.git"
+
+[tool.setuptools.packages.find]
+exclude = [
+  "tests-mlx",
+  "tests-mlx.*",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "e3nn_mlx.__version__"}
+readme = {file = ["README.md"], content-type = "text/markdown"}
+
+[tool.black]
+line-length = 127
+target-version = ['py37']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.flake8]
+max-line-length = 127
+max-complexity = 21
+select = ["B", "C", "E", "F", "W", "T4", "B9"]
+ignore = [
+    "E741",
+    "E203",
+    "W503",
+    "C901"
+]
+exclude = [
+  ".eggs",
+  "*.egg",
+  "build",
+  "dist",
+  "docs/_build",
+  "notebook"
+]
+
+[tool.coverage.run]
+source = ["e3nn_mlx"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise",
+    "except",
+]
