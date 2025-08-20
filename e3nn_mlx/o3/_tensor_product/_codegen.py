@@ -48,15 +48,21 @@ def codegen_tensor_product_left_right(
         if ins.i_out >= len(irreps_out):
             raise ValueError(f"instruction {i}: i_out={ins.i_out} >= len(irreps_out)={len(irreps_out)}")
         
-        if ins.connection_mode not in ["uvw", "uvu", "uvv", "uuw", "uuu"]:
+        if ins.connection_mode not in ["uvw", "uvu", "uvv", "uuw", "uuu", "uvuv", "uvu<v", "u<vw"]:
             raise ValueError(f"instruction {i}: invalid connection_mode '{ins.connection_mode}'")
         
         if len(ins.path_shape) != 3 and ins.connection_mode == "uvw":
             raise ValueError(f"instruction {i}: uvw mode requires path_shape of length 3")
-        if len(ins.path_shape) != 2 and ins.connection_mode in ["uvu", "uvv", "uuw"]:
+        if len(ins.path_shape) != 2 and ins.connection_mode in ["uvu", "uvv", "uuw", "uvuv"]:
             raise ValueError(f"instruction {i}: {ins.connection_mode} mode requires path_shape of length 2")
         if len(ins.path_shape) != 1 and ins.connection_mode == "uuu":
             raise ValueError(f"instruction {i}: uuu mode requires path_shape of length 1")
+        if ins.connection_mode in ["uvu<v", "u<vw"]:
+            # path_shape for uvu<v is (q,), for u<vw is (q, w)
+            if ins.connection_mode == "uvu<v" and len(ins.path_shape) != 1:
+                raise ValueError("uvu<v mode requires path_shape of length 1")
+            if ins.connection_mode == "u<vw" and len(ins.path_shape) != 2:
+                raise ValueError("u<vw mode requires path_shape of length 2")
     
     """
     Generate a function for tensor product computation.
@@ -360,11 +366,75 @@ def codegen_tensor_product_left_right(
                     temp = mx.einsum('ijk,buij->buk', w3j, xx)
                     result = temp.reshape(batch_numel, mul_in1 * mul_ir_out.ir.dim)
                     
+            elif ins.connection_mode == "uvuv":
+                # mul_out = mul_in1 * mul_in2
+                mul_in1, mul_in2 = ins.path_shape
+                if mul_in1 == 0 or mul_in2 == 0:
+                    result = mx.zeros((batch_numel, 0))
+                else:
+                    x1_reshaped = x1.reshape(batch_numel, mul_in1, mul_ir_in1.ir.dim)
+                    x2_reshaped = x2.reshape(batch_numel, mul_in2, mul_ir_in2.ir.dim)
+                    xx = mx.einsum('bui,bvj->buvij', x1_reshaped, x2_reshaped)
+                    # Apply Wigner 3j
+                    temp = mx.einsum('ijk,buvij->buvk', w3j, xx)
+                    if ins.has_weight:
+                        # weights shape (u,v) or (b,u,v); broadcast over k
+                        if shared_weights:
+                            temp = temp * w[None, ..., None]
+                        else:
+                            # w shape (b,u,v)
+                            temp = temp * w[..., None]
+                    # reshape to (b, (u*v)*k)
+                    result = temp.reshape(batch_numel, mul_in1 * mul_in2 * mul_ir_out.ir.dim)
+
             elif ins.connection_mode == "uvu<v":
-                raise NotImplementedError("uvu<v mode not implemented")
-                
+                # Requires mul_in1.mul == mul_in2.mul; output multiplicity is number of (u<v) pairs
+                m = mul_ir_in1.mul
+                if m == 0:
+                    result = mx.zeros((batch_numel, 0))
+                else:
+                    x1_reshaped = x1.reshape(batch_numel, m, mul_ir_in1.ir.dim)
+                    x2_reshaped = x2.reshape(batch_numel, m, mul_ir_in2.ir.dim)
+                    xx = mx.einsum('bui,bvj->buvij', x1_reshaped, x2_reshaped)
+                    # Flatten uv to one axis and gather only (u<v)
+                    xx_flat = xx.reshape(batch_numel, m * m, mul_ir_in1.ir.dim, mul_ir_in2.ir.dim)
+                    import numpy as _np
+                    rows, cols = _np.triu_indices(m, k=1)
+                    pair_idx = mx.array(rows * m + cols, dtype=mx.int32)
+                    xx_sel = mx.take(xx_flat, pair_idx, axis=1)  # (b, q, i, j)
+                    # Apply Wigner
+                    temp = mx.einsum('ijk,bqij->bqk', w3j, xx_sel)
+                    if ins.has_weight:
+                        # weights shape (q,) or (b,q)
+                        if shared_weights:
+                            temp = temp * w[None, :, None]
+                        else:
+                            temp = temp * w[..., None]
+                    # reshape to (b, q*k)
+                    q = ins.path_shape[0]
+                    result = temp.reshape(batch_numel, q * mul_ir_out.ir.dim)
+
             elif ins.connection_mode == "u<vw":
-                raise NotImplementedError("u<vw mode not implemented")
+                # Requires mul_in1.mul == mul_in2.mul; weighted only; weights shape (q, w)
+                m = mul_ir_in1.mul
+                if m == 0:
+                    result = mx.zeros((batch_numel, 0))
+                else:
+                    x1_reshaped = x1.reshape(batch_numel, m, mul_ir_in1.ir.dim)
+                    x2_reshaped = x2.reshape(batch_numel, m, mul_ir_in2.ir.dim)
+                    xx = mx.einsum('bui,bvj->buvij', x1_reshaped, x2_reshaped)
+                    xx_flat = xx.reshape(batch_numel, m * m, mul_ir_in1.ir.dim, mul_ir_in2.ir.dim)
+                    import numpy as _np
+                    rows, cols = _np.triu_indices(m, k=1)
+                    pair_idx = mx.array(rows * m + cols, dtype=mx.int32)
+                    xx_sel = mx.take(xx_flat, pair_idx, axis=1)  # (b, q, i, j)
+                    temp = mx.einsum('ijk,bqij->bqk', w3j, xx_sel)  # (b, q, k)
+                    # weights shape (q, w) or (b, q, w)
+                    if shared_weights:
+                        result_bwk = mx.einsum('qw,bqk->bwk', w, temp)
+                    else:
+                        result_bwk = mx.einsum('bqw,bqk->bwk', w, temp)
+                    result = result_bwk.reshape(batch_numel, mul_ir_out.mul * mul_ir_out.ir.dim)
             
             # Apply path weight
             if result is not None:

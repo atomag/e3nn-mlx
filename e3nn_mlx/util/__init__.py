@@ -109,3 +109,11 @@ def broadcast_shapes(*shapes):
         result.append(max_dim)
     
     return tuple(result)
+
+# Safe linalg fallbacks
+from .safe_linalg import (
+    safe_inv,
+    safe_det,
+    safe_solve,
+    safe_pinv,
+)
