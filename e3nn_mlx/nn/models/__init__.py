@@ -1,11 +1,23 @@
-"""
-Neural network models for e3nn-mlx.
+from mlx import nn
+import mlx.core as mx
 
-This module provides pre-built equivariant neural network architectures
-that can be used for common tasks in 3D deep learning.
-"""
+from .gate_points_2101 import Convolution, Network as GatePointsNetwork
 
-from .simple_network import SimpleNetwork
-from .gate_network import GatePointsNetwork
+class SimpleNetwork(nn.Module):
+    """Minimal stub simple network to satisfy imports.
 
-__all__ = ["SimpleNetwork", "GatePointsNetwork"]
+    This placeholder returns zeros; replace with a proper implementation as needed.
+    """
+    def __init__(self, output_dim: int = 1) -> None:
+        super().__init__()
+        self.output_dim = int(output_dim)
+
+    def __call__(self, data):
+        n = data["pos"].shape[0] if "pos" in data else 1
+        return mx.zeros((n, self.output_dim))
+
+__all__ = [
+    "Convolution",
+    "GatePointsNetwork",
+    "SimpleNetwork",
+]

@@ -7,6 +7,7 @@ Conventions follow e3nn (0.5.x):
 """
 
 import mlx.core as mx
+from ..util import explicit_default_types, ctx_default_device
 
 
 # ---------------------
@@ -131,12 +132,15 @@ def matrix_to_angles(R: mx.array):
 # Angles utilities
 # -----------------
 
-def identity_angles(*shape, dtype=mx.float32):
-    z = mx.zeros(shape, dtype=dtype)
+def identity_angles(*shape, requires_grad: bool = False, dtype=mx.float32, device=None):
+    dtype, device = explicit_default_types(dtype, device)
+    with ctx_default_device(device):
+        z = mx.zeros(shape, dtype=dtype)
     return z, z, z
 
 
-def rand_angles(*shape, dtype=mx.float32):
+def rand_angles(*shape, requires_grad: bool = False, dtype=mx.float32, device=None):
+    dtype, device = explicit_default_types(dtype, device)
     two_pi = 2.0 * mx.array(mx.pi, dtype=dtype)
     # alpha, gamma uniform in [0, 2pi)
     u = mx.random.uniform(0.0, 1.0, (2,) + shape).astype(dtype)
@@ -241,8 +245,10 @@ def inverse_quaternion(q: mx.array) -> mx.array:
     return mx.concatenate([q[..., 0:1], -q[..., 1:4]], axis=-1)
 
 
-def identity_quaternion(*shape, dtype=mx.float32) -> mx.array:
-    q = mx.zeros(shape + (4,), dtype=dtype)
+def identity_quaternion(*shape, requires_grad: bool = False, dtype=mx.float32, device=None) -> mx.array:
+    dtype, device = explicit_default_types(dtype, device)
+    with ctx_default_device(device):
+        q = mx.zeros(shape + (4,), dtype=dtype)
     # Set w=1
     if q.ndim == 1:  # shape == (4,)
         q = q.at[0].set(1.0)
@@ -253,8 +259,8 @@ def identity_quaternion(*shape, dtype=mx.float32) -> mx.array:
     return q
 
 
-def rand_quaternion(*shape, dtype=mx.float32) -> mx.array:
-    a, b, c = rand_angles(*shape, dtype=dtype)
+def rand_quaternion(*shape, requires_grad: bool = False, dtype=mx.float32, device=None) -> mx.array:
+    a, b, c = rand_angles(*shape, dtype=dtype, device=device)
     return angles_to_quaternion(a, b, c)
 
 
@@ -314,20 +320,36 @@ def axis_angle_to_angles(axis: mx.array, angle: mx.array):
     return quaternion_to_angles(axis_angle_to_quaternion(axis, angle))
 
 
+def rand_axis_angle(*shape, requires_grad: bool = False, dtype=mx.float32, device=None):
+    """Generate a random axis-angle rotation (API parity with e3nn)."""
+    a, b, c = rand_angles(*shape, dtype=dtype, device=device)
+    return angles_to_axis_angle(a, b, c)
+
+
+def compose_axis_angle(axis1: mx.array, angle1: mx.array, axis2: mx.array, angle2: mx.array):
+    """Compose two axis-angle rotations (axis2,angle2) applied first, then (axis1,angle1)."""
+    q1 = axis_angle_to_quaternion(axis1, angle1)
+    q2 = axis_angle_to_quaternion(axis2, angle2)
+    q = compose_quaternion(q1, q2)
+    return quaternion_to_axis_angle(q)
+
+
 # --------------
 # Matrix helpers
 # --------------
 
-def identity(dtype=mx.float32) -> mx.array:
-    return mx.eye(3, dtype=dtype)
+def identity(dtype=mx.float32, device=None) -> mx.array:
+    dtype, device = explicit_default_types(dtype, device)
+    with ctx_default_device(device):
+        return mx.eye(3, dtype=dtype)
 
 
-def rand(dtype=mx.float32) -> mx.array:
-    return rand_matrix(dtype=dtype)
+def rand(dtype=mx.float32, device=None) -> mx.array:
+    return rand_matrix(dtype=dtype, device=device)
 
 
-def rand_matrix(*shape, dtype=mx.float32) -> mx.array:
-    a, b, c = rand_angles(*shape, dtype=dtype)
+def rand_matrix(*shape, requires_grad: bool = False, dtype=mx.float32, device=None) -> mx.array:
+    a, b, c = rand_angles(*shape, dtype=dtype, device=device)
     return angles_to_matrix(a, b, c)
 
 

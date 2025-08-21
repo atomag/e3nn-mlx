@@ -4,11 +4,18 @@ Normalization utilities for activation functions.
 
 import mlx.core as mx
 import math
-from typing import Callable
+from typing import Callable, Union
 
 
-def normalize2mom(x, dim=-1, eps=1e-5):
-    """Normalize to have zero mean and unit variance."""
+def normalize2mom(x: Union[Callable, mx.array], dim: int = -1, eps: float = 1e-5, dtype: mx.Dtype = mx.float32):
+    """Normalize to unit second moment.
+
+    - If ``x`` is a callable, returns a wrapper that rescales its output so that E[f(z)^2] = 1 for z ~ N(0,1).
+    - If ``x`` is an array, normalize it to zero mean and unit variance along ``dim``.
+    """
+    if callable(x):
+        return Normalize2Mom(x, dtype=dtype)
+    # Treat as array normalization (compat with some call sites)
     mean = mx.mean(x, axis=dim, keepdims=True)
     var = mx.var(x, axis=dim, keepdims=True)
     return (x - mean) / mx.sqrt(var + eps)

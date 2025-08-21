@@ -64,7 +64,7 @@ class Dropout(nn.Module):
                 noise = mx.ones((batch, mul))
             else:
                 # Generate Bernoulli random variable and scale
-                noise = mx.random.bernoulli((batch, mul), 1 - self.p) / (1 - self.p)
+                noise = mx.random.bernoulli(1 - self.p, (batch, mul)) / (1 - self.p)
 
             noise = mx.repeat(noise[:, :, None], dim, axis=2).reshape(batch, mul * dim)
             noises.append(noise)

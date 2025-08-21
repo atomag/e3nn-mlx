@@ -76,47 +76,31 @@ def _su2_clebsch_gordan_coeff(j1: float, m1: float, j2: float, m2: float, j3: fl
 
 
 def _change_basis_real_to_complex(l: int) -> mx.array:
-    """
-    Compute basis transformation matrix from real to complex spherical harmonics.
-    
-    Parameters
-    ----------
-    l : int
-        Angular momentum quantum number
-        
-    Returns
-    -------
-    Q : mx.array
-        Transformation matrix of shape (2l+1, 2l+1)
+    """Change of basis matrix from real to complex spherical harmonics.
+
+    Matches e3nn (PyTorch) conventions, including the (-1j)^l phase to make
+    CG coefficients real.
     """
     dim = 2 * l + 1
-    Q = mx.zeros((dim, dim))
-    
-    for m in range(-l, l + 1):
-        for mp in range(-l, l + 1):
-            idx1 = m + l
-            idx2 = mp + l
-            
-            if m == 0:
-                # m=0 is the same in both bases
-                Q[idx1, idx2] = 1.0 if mp == 0 else 0.0
-            elif m > 0:
-                # Positive m: combination of complex ±m
-                if mp == m:
-                    Q[idx1, idx2] = 1.0 / sqrt(2.0)
-                elif mp == -m:
-                    Q[idx1, idx2] = -1j / sqrt(2.0)
-                else:
-                    Q[idx1, idx2] = 0.0
-            else:
-                # Negative m: combination of complex ±m
-                if mp == -m:
-                    Q[idx1, idx2] = 1.0 / sqrt(2.0)
-                elif mp == m:
-                    Q[idx1, idx2] = 1j / sqrt(2.0)
-                else:
-                    Q[idx1, idx2] = 0.0
-    
+    Q = mx.zeros((dim, dim), dtype=mx.complex64)
+
+    # m < 0 rows
+    for m in range(-l, 0):
+        Q = array_at_set_workaround(Q, (l + m, l + abs(m)), 1.0 / sqrt(2.0))
+        Q = array_at_set_workaround(Q, (l + m, l - abs(m)), mx.array(-1j / sqrt(2.0), dtype=mx.complex64))
+
+    # m == 0 row
+    Q = array_at_set_workaround(Q, (l, l), 1.0)
+
+    # m > 0 rows
+    for m in range(1, l + 1):
+        s = (-1.0) ** m
+        Q = array_at_set_workaround(Q, (l + m, l + m), s / sqrt(2.0))
+        Q = array_at_set_workaround(Q, (l + m, l - m), mx.array(1j * s / sqrt(2.0), dtype=mx.complex64))
+
+    # Global phase (-1j)^l
+    phase = (-1j) ** l
+    Q = Q * phase
     return Q
 
 
@@ -226,38 +210,96 @@ def wigner_3j(l1: int, l2: int, l3: int) -> mx.array:
 
 
 def wigner_D(l: int, alpha: mx.array, beta: mx.array, gamma: mx.array) -> mx.array:
+    """Wigner D matrix in real basis using ZYZ-parameter closed form.
+
+    Converts Y-X-Y angles to Z-Y-Z, then applies D_complex = e^{-i m α'} d(β') e^{-i m' γ'} and
+    transforms to real basis.
     """
-    Compute Wigner D-matrix for rotation by Euler angles.
-    
-    Args:
-        l: Angular momentum
-        alpha, beta, gamma: Euler angles (can be arrays)
-        
-    Returns:
-        Wigner D-matrix as MLX array of shape (..., 2l+1, 2l+1)
-    """
-    # Handle batch dimensions - if any angle has ndim > 0, treat as batch
-    if alpha.ndim > 0 or beta.ndim > 0 or gamma.ndim > 0:
-        # Determine batch size from the first non-scalar angle
-        if alpha.ndim > 0:
-            batch_size = alpha.shape[0]
-        elif beta.ndim > 0:
-            batch_size = beta.shape[0]
-        else:
-            batch_size = gamma.shape[0]
-        
-        dim = 2*l + 1
-        
-        # For now, return identity matrices for each sample
-        # In a proper implementation, this would compute actual Wigner D matrices
-        result = []
-        for i in range(batch_size):
-            result.append(mx.eye(dim))
-        return mx.stack(result)
+    from ._rotation import angles_to_matrix
+
+    dim = 2 * l + 1
+
+    def factorial(n: int) -> float:
+        from math import factorial as f
+        if n < 0:
+            return 1.0
+        return float(f(n))
+
+    def small_d(l: int, beta: mx.array) -> mx.array:
+        is_scalar = (beta.ndim == 0)
+        beta_in = beta[None] if is_scalar else beta
+        B = beta_in.shape[0]
+        cb = mx.cos(0.5 * beta_in)
+        sb = mx.sin(0.5 * beta_in)
+        d = mx.zeros((B, dim, dim), dtype=beta_in.dtype)
+        fact_cache = {}
+        def F(n):
+            if n not in fact_cache:
+                fact_cache[n] = factorial(n)
+            return fact_cache[n]
+        for m in range(-l, l + 1):
+            for mp in range(-l, l + 1):
+                pref = (F(l + m) * F(l - m) * F(l + mp) * F(l - mp)) ** 0.5
+                kmin = max(0, m - mp)
+                kmax = min(l + m, l - mp)
+                val = mx.zeros((B,), dtype=beta_in.dtype)
+                for k in range(int(kmin), int(kmax) + 1):
+                    denom = F(l + m - k) * F(l - mp - k) * F(k) * F(k + mp - m)
+                    if denom == 0:
+                        continue
+                    pcos = 2 * l + m - mp - 2 * k
+                    psin = 2 * k + mp - m
+                    term = ((-1.0) ** (k - m + mp)) * (pref / denom)
+                    term = term * (mx.power(cb, pcos) * mx.power(sb, psin))
+                    val = val + term
+                for b in range(B):
+                    d = array_at_set_workaround(d, (b, m + l, mp + l), val[b])
+        return d[0] if is_scalar else d
+
+    def to_batched(x):
+        return x[None] if x.ndim == 0 else x
+
+    alpha_b = to_batched(alpha)
+    beta_b = to_batched(beta)
+    gamma_b = to_batched(gamma)
+    B = max(alpha_b.shape[0], beta_b.shape[0], gamma_b.shape[0])
+    if alpha_b.shape[0] != B:
+        alpha_b = mx.broadcast_to(alpha_b, (B,))
+    if beta_b.shape[0] != B:
+        beta_b = mx.broadcast_to(beta_b, (B,))
+    if gamma_b.shape[0] != B:
+        gamma_b = mx.broadcast_to(gamma_b, (B,))
+
+    # Convert Y-X-Y to Z-Y-Z via rotation matrix extraction
+    R = angles_to_matrix(alpha_b, beta_b, gamma_b)
+    # Extract ZYZ Euler angles α', β', γ'
+    # beta' = arccos(R[2,2])
+    beta_p = mx.arccos(mx.clip(R[:, 2, 2] if R.ndim == 3 else R[2, 2], -1.0, 1.0))
+    # alpha' = atan2(R[1,2], R[0,2])
+    if R.ndim == 3:
+        alpha_p = mx.arctan2(R[:, 1, 2], R[:, 0, 2])
+        gamma_p = mx.arctan2(R[:, 2, 1], -R[:, 2, 0])
     else:
-        # Single matrix case
-        dim = 2*l + 1
-        return mx.eye(dim)
+        alpha_p = mx.arctan2(R[1, 2], R[0, 2])
+        gamma_p = mx.arctan2(R[2, 1], -R[2, 0])
+
+    # Build D_complex from ZYZ angles
+    m_vals = mx.arange(-l, l + 1, dtype=beta_p.dtype)
+    Ealpha = mx.exp((-1j) * alpha_p[:, None] * m_vals[None, :]) if alpha_p.ndim == 1 else mx.exp((-1j) * alpha_p * m_vals)
+    Egamma = mx.exp((-1j) * gamma_p[:, None] * m_vals[None, :]) if gamma_p.ndim == 1 else mx.exp((-1j) * gamma_p * m_vals)
+    dmat = small_d(l, beta_p)
+    if dmat.ndim == 2:
+        dmat = dmat[None]
+    D_complex = (Ealpha[:, :, None].astype(mx.complex64) * dmat.astype(mx.complex64)) * Egamma[:, None, :].astype(mx.complex64)
+
+    Q = _change_basis_real_to_complex(l)
+    Qh = mx.conj(Q).T
+    D_left = mx.einsum("ij,bjk->bik", Qh, D_complex)
+    D_real_c = mx.einsum("bij,jk->bik", D_left, Q)
+    # Enforce real-valued representation
+    D_real = mx.real(D_real_c)
+
+    return D_real if (alpha.ndim > 0 or beta.ndim > 0 or gamma.ndim > 0) else D_real[0]
 
 
 def change_basis_real_to_complex(l: int) -> mx.array:
@@ -336,56 +378,22 @@ def su2_generators(j: int) -> mx.array:
 
 
 def so3_generators(l: int) -> mx.array:
+    """Compute SO(3) generators (Lx, Ly, Lz) numerically from wigner_D at identity.
+
+    Ensures consistency with wigner_D implementation and Y-X-Y convention.
     """
-    Compute SO(3) generators for angular momentum l.
-    
-    Parameters
-    ----------
-    l : int
-        Angular momentum quantum number
-        
-    Returns
-    -------
-    generators : mx.array
-        SO(3) generators of shape (3, 2l+1, 2l+1)
-    """
-    # For SO(3), the generators are real matrices
-    # We can compute them directly or use a simplified approach
-    
-    dim = 2*l + 1
-    
-    # SO(3) generators are real matrices representing angular momentum operators
-    # These are the same as the real parts of the SU(2) generators in the real basis
-    
-    # Lx generator (real)
-    Lx = mx.zeros((dim, dim))
-    for m in range(-l, l):
-        # Matrix elements of Lx
-        coeff = 0.5 * mx.sqrt(l*(l+1) - m*(m+1))
-        i1, i2 = m + l, (m + 1) + l
-        if i1 < dim and i2 < dim:
-            Lx = Lx.at[i2, i1].add(coeff)
-            Lx = Lx.at[i1, i2].add(coeff)
-    
-    # Ly generator (real) - note that Ly has imaginary components in complex basis
-    # but becomes real in the real (spherical harmonic) basis
-    Ly = mx.zeros((dim, dim))
-    for m in range(-l, l):
-        # Matrix elements of Ly  
-        coeff = -0.5j * mx.sqrt(l*(l+1) - m*(m+1))
-        # In real basis, this becomes real
-        coeff_real = 0.5 * mx.sqrt(l*(l+1) - m*(m+1))
-        i1, i2 = m + l, (m + 1) + l
-        if i1 < dim and i2 < dim:
-            Ly = Ly.at[i2, i1].add(coeff_real)
-            Ly = Ly.at[i1, i2].add(-coeff_real)
-    
-    # Lz generator (real)
-    Lz = mx.zeros((dim, dim))
-    for m in range(-l, l + 1):
-        i = m + l
-        Lz = Lz.at[i, i].add(m)
-    
+    eps = mx.array(1e-3)
+    I = wigner_D(l, mx.array(0.0), mx.array(0.0), mx.array(0.0))
+    # Lx = d/dβ at 0
+    Dp = wigner_D(l, mx.array(0.0), eps, mx.array(0.0))
+    Dm = wigner_D(l, mx.array(0.0), -eps, mx.array(0.0))
+    Lx = (Dp - Dm) / (2 * float(eps.tolist()))
+    # Ly = d/dα at 0
+    Dp = wigner_D(l, eps, mx.array(0.0), mx.array(0.0))
+    Dm = wigner_D(l, -eps, mx.array(0.0), mx.array(0.0))
+    Ly = (Dp - Dm) / (2 * float(eps.tolist()))
+    # Lz = [Lx, Ly]
+    Lz = mx.matmul(Ly, Lx) - mx.matmul(Lx, Ly)
     return mx.stack([Lx, Ly, Lz])
 
 

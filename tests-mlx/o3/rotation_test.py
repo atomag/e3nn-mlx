@@ -5,17 +5,13 @@ from e3nn_mlx import o3
 
 
 def test_xyz(float_tolerance) -> None:
-    # Skip this test due to rotation convention mismatches in the MLX implementation
-    pytest.skip("Skipping xyz test due to rotation convention mismatches between PyTorch and MLX implementations")
-    
     R = o3.rand_matrix(10)
     assert (R @ R.transpose(0, 2, 1) - mx.eye(3)).abs().max() < float_tolerance
 
     a, b, c = o3.matrix_to_angles(R)
     pos1 = o3.angles_to_xyz(a, b)
     pos2 = R @ mx.array([0, 1.0, 0])
-    # Increased tolerance for MLX numerical precision
-    assert mx.allclose(pos1, pos2, atol=float_tolerance * 100.0)
+    assert mx.allclose(pos1, pos2, atol=float_tolerance)
 
     a2, b2 = o3.xyz_to_angles(pos2)
     assert (a - a2).abs().max() < float_tolerance
@@ -23,9 +19,6 @@ def test_xyz(float_tolerance) -> None:
 
 
 def test_conversions(float_tolerance) -> None:
-    # Skip this test due to numerical precision issues with MLX
-    pytest.skip("Skipping conversion test due to MLX numerical precision issues")
-    
     def wrap(f):
         def g(x):
             if isinstance(x, tuple):

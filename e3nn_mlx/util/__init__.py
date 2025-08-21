@@ -55,7 +55,6 @@ from ._context import (
     get_default_device,
     set_default_dtype,
     set_default_device,
-    explicit_default_types,
     resolve_dtype,
     resolve_device,
 )
@@ -117,3 +116,79 @@ from .safe_linalg import (
     safe_solve,
     safe_pinv,
 )
+
+# Default types
+from .default_type import (
+    mlx_get_default_dtype,
+    mlx_get_default_device,
+    explicit_default_types,
+    set_default_dtype_and_device,
+    default_dtype as ctx_default_dtype,
+    default_device as ctx_default_device,
+)
+
+# PyTorch-compatible naming wrappers for API parity
+def torch_get_default_tensor_type():
+    """Compatibility: return MLX default dtype (maps from torch API)."""
+    return mlx_get_default_dtype()
+
+
+def torch_get_default_device():
+    """Compatibility: return MLX default device (maps from torch API)."""
+    return mlx_get_default_device()
+
+
+# Public API surface for compatibility with e3nn
+__all__ = [
+    # Parity with e3nn.util
+    "torch_get_default_tensor_type",
+    "torch_get_default_device",
+    "explicit_default_types",
+    "prod",
+    # Commonly used MLX/e3nn-mlx utilities (extra exports)
+    "compile_mode",
+    "get_compile_mode",
+    "compile",
+    "trace_module",
+    "trace",
+    "script",
+    "disable_mlx_codegen",
+    "prepare",
+    "simplify_if_compile",
+    "simplify",
+    "_transform",
+    "_get_io_irreps",
+    "_get_args_in",
+    "_rand_args",
+    "_get_device",
+    "_get_floating_dtype",
+    "_to_device_dtype",
+    "_make_tracing_inputs",
+    "default_dtype",
+    "default_device",
+    "get_default_dtype",
+    "get_default_device",
+    "set_default_dtype",
+    "set_default_device",
+    "resolve_dtype",
+    "resolve_device",
+    "Chunk",
+    "Path",
+    "TensorProductPath",
+    "OptimizedOperation",
+    "Instruction",
+    "chunk_from_slice",
+    "path_from_instructions",
+    "validate_chunk",
+    "validate_path",
+    "broadcast_shapes",
+    "safe_inv",
+    "safe_det",
+    "safe_solve",
+    "safe_pinv",
+    "mlx_get_default_dtype",
+    "mlx_get_default_device",
+    "set_default_dtype_and_device",
+    "ctx_default_dtype",
+    "ctx_default_device",
+]

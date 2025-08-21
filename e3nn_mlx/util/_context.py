@@ -43,11 +43,18 @@ def default_device(device: mx.Device):
     """
     global _default_device
     old_device = _default_device
+    # Capture MLX's current default
+    old_mlx = mx.default_device()
     _default_device = device
     try:
+        # Set MLX global default device while in context
+        mx.set_default_device(device)
         yield
     finally:
         _default_device = old_device
+        # Restore MLX global default device
+        if old_mlx is not None:
+            mx.set_default_device(old_mlx)
 
 
 def get_default_dtype() -> Optional[mx.Dtype]:
@@ -94,6 +101,10 @@ def set_default_device(device: mx.Device):
     """
     global _default_device
     _default_device = device
+    try:
+        mx.set_default_device(device)
+    except Exception:
+        pass
 
 
 @contextmanager
@@ -108,7 +119,7 @@ def explicit_default_types():
     
     # Set explicit defaults
     set_default_dtype(mx.float32)
-    set_default_device(mx.default_device() or mx.cpu())
+    set_default_device(mx.default_device() or mx.cpu)
     
     try:
         yield
@@ -155,4 +166,4 @@ def resolve_device(device: Optional[mx.Device] = None) -> mx.Device:
         return device
     if _default_device is not None:
         return _default_device
-    return mx.default_device() or mx.cpu()
+    return mx.default_device() or mx.cpu

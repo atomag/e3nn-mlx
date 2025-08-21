@@ -11,7 +11,7 @@ from ._orthonormalize import orthonormalize
 from ._linalg import direct_sum, orthonormalize as orthonormalize_linalg, complete_basis
 from ._soft_unit_step import soft_unit_step
 from ._soft_one_hot_linspace import soft_one_hot_linspace
-from ._normalize_activation import moment, Normalize2Mom, normalize2mom_class
+from ._normalize_activation import moment, Normalize2Mom, normalize2mom, normalize2mom_class
 
 __all__ = [
     "germinate_formulas",
@@ -35,6 +35,7 @@ __all__ = [
     "soft_unit_step",
     "soft_one_hot_linspace",
     "moment",
+    "normalize2mom",
     "Normalize2Mom",
     "normalize2mom_class",
 ]

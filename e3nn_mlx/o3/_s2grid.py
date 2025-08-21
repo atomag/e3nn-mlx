@@ -34,21 +34,7 @@ import mlx.core as mx
 import mlx.nn as nn
 
 from ._spherical_harmonics import spherical_harmonics_alpha
-# Simplified Legendre class for spherical harmonics
-class Legendre:
-    """Simplified Legendre polynomial implementation."""
-    
-    def __init__(self, lmax):
-        self.lmax = lmax
-    
-    def __call__(self, x):
-        """Compute Legendre polynomials up to lmax."""
-        # Simple implementation for testing
-        result = []
-        for l in range(self.lmax + 1):
-            # Placeholder for Legendre polynomials
-            result.append(mx.ones_like(x))
-        return mx.stack(result, axis=-1)
+from ._legendre import Legendre
 
 
 def _quadrature_weights(b, dtype=None):

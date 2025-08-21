@@ -488,6 +488,15 @@ def codegen_tensor_product_right(
     This computes the operator that can be applied to x to get the result.
     """
     
+    # Build a generic forward function for fallback operator construction
+    _forward_main = codegen_tensor_product_left_right(
+        irreps_in1,
+        irreps_in2,
+        irreps_out,
+        instructions,
+        shared_weights,
+    )
+
     def tensor_product_right(y: mx.array, weights: mx.array) -> mx.array:
         """Right method for tensor product."""
         
@@ -522,6 +531,28 @@ def codegen_tensor_product_right(
         if len(valid_instructions) == 0:
             return mx.zeros(original_shape + (irreps_in1.dim, irreps_out.dim))
         
+        # If unsupported connection modes present, use a robust fallback by evaluating
+        # the forward function on basis vectors to assemble the operator.
+        if any(ins.connection_mode in ("uvuv", "uvu<v", "u<vw") for ins in valid_instructions):
+            in1_dim = irreps_in1.dim
+            out_dim = irreps_out.dim
+            # Build stacked inputs: for each batch sample, stack identity over input dim
+            I = mx.eye(in1_dim)
+            I_exp = mx.broadcast_to(I, (batch_numel,) + I.shape)  # (B, in1_dim, in1_dim)
+            X_big = I_exp.reshape(batch_numel * in1_dim, in1_dim)
+            # Repeat y and weights along the new stacked dimension
+            Y_big = mx.tile(y_flat[:, None, :], (1, in1_dim, 1)).reshape(batch_numel * in1_dim, irreps_in2.dim)
+            if weight_numel > 0:
+                if shared_weights:
+                    W_big = weights_flat  # (P,)
+                else:
+                    W_big = mx.tile(weights_flat[:, None, :], (1, in1_dim, 1)).reshape(batch_numel *  in1_dim, weight_numel)
+            else:
+                W_big = mx.array([])
+            Z_big = _forward_main(X_big, Y_big, W_big)
+            Z = Z_big.reshape(batch_numel, in1_dim, out_dim)
+            return Z
+
         # Track weight index
         flat_weight_index = 0
         outputs = []
