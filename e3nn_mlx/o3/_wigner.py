@@ -8,6 +8,7 @@ import math
 from math import factorial, sqrt
 from typing import Tuple
 from functools import lru_cache
+import numpy as _np
 from ..util._array_workarounds import array_at_set_workaround
 
 
@@ -139,74 +140,85 @@ def _so3_clebsch_gordan(l1: int, l2: int, l3: int) -> mx.array:
                 coeff = _su2_clebsch_gordan_coeff(l1, m1, l2, m2, l3, m3)
                 C_su2 = array_at_set_workaround(C_su2, (idx1, idx2, idx3), coeff)
     
-    # Transform to SO(3) basis
-    # C_SO3 = Q1^T @ C_SU2 @ Q2 @ Q3^*
+    # Transform to SO(3) real basis without renormalization
+    # C_SO3(real) = Q1^H @ C_SU2 @ (Q2) @ (Q3)^*
+    # where Q maps real->complex; ^H denotes conjugate transpose
     C_so3 = mx.zeros((dim1, dim2, dim3), dtype=mx.complex64)
-    
     for i in range(dim1):
         for j in range(dim2):
             for k in range(dim3):
-                # Perform the basis transformation
                 temp = 0.0 + 0.0j
                 for i1 in range(dim1):
                     for j1 in range(dim2):
                         for k1 in range(dim3):
                             temp += (
-                                Q1[i1, i] * Q2[j1, j] * mx.conj(Q3[k1, k]) * 
-                                C_su2[i1, j1, k1]
+                                Q1[i1, i] * Q2[j1, j] * mx.conj(Q3[k1, k]) * C_su2[i1, j1, k1]
                             )
                 C_so3 = array_at_set_workaround(C_so3, (i, j, k), temp)
-    
-    # Ensure real and normalize
-    C_real = mx.real(C_so3)
-    C_norm = mx.linalg.norm(C_real)
-    
-    if C_norm > 1e-10:
-        C_real = C_real / C_norm
-    
-    return C_real
+    # Drop tiny imaginary residuals from numerical noise; keep sign/scale
+    return mx.real(C_so3)
 
 
 @lru_cache(maxsize=None)
 def wigner_3j(l1: int, l2: int, l3: int) -> mx.array:
+    """Compute Wigner 3j symbols via SO(3) intertwiners consistent with wigner_D.
+
+    Finds the unique (up to scale) equivariant map T: V_{l1} ⊗ V_{l2} → V_{l3}
+    satisfying T (L ⊗ I + I ⊗ L) = L T for L in {Lx, Ly, Lz} using the generators
+    derived from wigner_D. Returns C[i,j,k] with C being the components of T reshaped
+    as (2l1+1, 2l2+1, 2l3+1).
     """
-    Compute Wigner 3j symbols for given angular momenta.
-    
-    Mathematically correct implementation using Racah formula.
-    
-    Parameters
-    ----------
-    l1, l2, l3 : int
-        Angular momentum quantum numbers
-        
-    Returns
-    -------
-    w3j : mx.array
-        Wigner 3j symbols of shape (2l1+1, 2l2+1, 2l3+1)
-    """
-    # Check triangle condition
-    if abs(l1 - l2) > l3 or l1 + l2 < l3:
-        return mx.zeros((2*l1+1, 2*l2+1, 2*l3+1))
-    
-    # Wigner 3j symbols are related to Clebsch-Gordan coefficients by:
-    # ( l1  l2  l3 ) = (-1)^(l1-l2-m3) / sqrt(2*l3+1) * <l1 m1 l2 m2 | l3 -m3>
-    # ( m1  m2  m3 )
-    
-    cg = _so3_clebsch_gordan(l1, l2, l3)
-    w3j = mx.zeros_like(cg)
-    
-    for m1 in range(-l1, l1 + 1):
-        for m2 in range(-l2, l2 + 1):
-            for m3 in range(-l3, l3 + 1):
-                idx1, idx2, idx3 = m1 + l1, m2 + l2, m3 + l3
-                
-                # Apply phase factor and normalization
-                phase = (-1.0) ** int(l1 - l2 - m3)
-                norm = 1.0 / sqrt(2.0 * l3 + 1.0)
-                
-                w3j = array_at_set_workaround(w3j, (idx1, idx2, idx3), phase * norm * cg[idx1, idx2, idx3])
-    
-    return w3j
+    # Triangle condition
+    if abs(l1 - l2) > l3 or (l1 + l2) < l3:
+        return mx.zeros((2 * l1 + 1, 2 * l2 + 1, 2 * l3 + 1))
+
+    d1, d2, d3 = 2 * l1 + 1, 2 * l2 + 1, 2 * l3 + 1
+    # Generators (Lx, Ly, Lz) in real basis
+    G1 = so3_generators(l1).to_numpy() if hasattr(so3_generators(l1), 'to_numpy') else _np.array(so3_generators(l1))
+    G2 = so3_generators(l2).to_numpy() if hasattr(so3_generators(l2), 'to_numpy') else _np.array(so3_generators(l2))
+    G3 = so3_generators(l3).to_numpy() if hasattr(so3_generators(l3), 'to_numpy') else _np.array(so3_generators(l3))
+    Lx1, Ly1, Lz1 = [G1[i] for i in range(3)]
+    Lx2, Ly2, Lz2 = [G2[i] for i in range(3)]
+    Lx3, Ly3, Lz3 = [G3[i] for i in range(3)]
+
+    def kron(A, B):
+        return _np.kron(A, B)
+
+    I1 = _np.eye(d1)
+    I2 = _np.eye(d2)
+    I3 = _np.eye(d3)
+    # Build commutation constraints: T (L1⊗I + I⊗L2) = L3 T
+    # In vectorized form: (I3 ⊗ (L1⊗I + I⊗L2)^T - L3 ⊗ I12) vec(T) = 0
+    I12 = _np.eye(d1 * d2)
+
+    def A(L1, L2, L3):
+        L12 = kron(L1, I2) + kron(I1, L2)
+        return _np.kron(I3, L12.T) - _np.kron(L3, I12)
+
+    M = _np.vstack([
+        A(Lx1, Lx2, Lx3),
+        A(Ly1, Ly2, Ly3),
+        A(Lz1, Lz2, Lz3),
+    ])
+
+    # Compute (approximate) nullspace via SVD
+    U, S, Vh = _np.linalg.svd(M)
+    # Nullspace vectors correspond to singular values ~ 0; take last row of Vh
+    v = Vh[-1]
+    T = v.reshape(d3, d1 * d2)
+
+    # Normalize T to unit Frobenius norm and fix sign convention
+    norm = _np.linalg.norm(T)
+    if norm > 0:
+        T = T / norm
+    # Fix global sign so that the largest magnitude entry is positive
+    idx = _np.unravel_index(_np.argmax(_np.abs(T)), T.shape)
+    if T[idx] < 0:
+        T = -T
+
+    # Reshape to (i,j,k)
+    C = T.reshape(d3, d1, d2).transpose(1, 2, 0)
+    return mx.array(C, dtype=mx.float32)
 
 
 def wigner_D(l: int, alpha: mx.array, beta: mx.array, gamma: mx.array) -> mx.array:

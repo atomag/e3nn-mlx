@@ -34,7 +34,7 @@ import mlx.core as mx
 import mlx.nn as nn
 
 from ._spherical_harmonics import spherical_harmonics_alpha
-from ._legendre import Legendre
+from ._angular_spherical_harmonics import legendre as _legendre_ab
 
 
 def _quadrature_weights(b, dtype=None):
@@ -125,7 +125,8 @@ def spherical_harmonics_s2_grid(lmax, res_beta, res_alpha, dtype=None):
         tensor of shape ``(res_alpha, 2 lmax + 1)``
     """
     betas, alphas = s2_grid(res_beta, res_alpha, dtype=dtype)
-    shb = Legendre(list(range(lmax + 1)))(betas.cos(), betas.sin().abs())  # [b, l * m]
+    # Use angular-module Legendre (exact via sympy) for correctness
+    shb = _legendre_ab(list(range(lmax + 1)), betas.cos(), betas.sin().abs())  # [b, l * m]
     sha = spherical_harmonics_alpha(lmax, alphas)  # [a, m]
     return betas, alphas, shb, sha
 

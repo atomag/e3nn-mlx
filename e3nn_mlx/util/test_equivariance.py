@@ -8,7 +8,7 @@ under rotations and other symmetry transformations.
 import mlx.core as mx
 import numpy as np
 from typing import Callable, List, Tuple, Optional, Union
-from ..o3 import Irreps, wigner_D, angles_to_matrix, rand_matrix
+from ..o3 import Irreps, wigner_D, angles_to_matrix, rand_matrix, matrix_to_angles
 
 
 class EquivarianceTester:
@@ -259,7 +259,7 @@ class EquivarianceTester:
         """Apply rotation to features."""
         output = []
         index = 0
-        
+
         for mul, (l, p) in irreps:
             dim = mul * (2 * l + 1)
             chunk = x[index:index + dim]
@@ -270,7 +270,9 @@ class EquivarianceTester:
                 output.append(chunk)
             else:
                 # Apply Wigner D-matrix for each l
-                D = wigner_D(l, R[0], R[1], R[2])
+                # Convert rotation matrix to Euler angles (Y-X-Y convention)
+                a, b, c = matrix_to_angles(R)
+                D = wigner_D(l, a, b, c)
                 
                 # Reshape and apply rotation
                 chunk_reshaped = chunk.reshape(mul, 2 * l + 1)
@@ -291,9 +293,8 @@ class EquivarianceTester:
             chunk = x[index:index + dim]
             index += dim
             
-            # Apply parity transformation: (-1)^l
-            sign = (-1) ** l
-            output.append(sign * chunk)
+            # Apply O(3) parity: multiply by irrep parity p (±1)
+            output.append(p * chunk)
             
         return mx.concatenate(output)
         

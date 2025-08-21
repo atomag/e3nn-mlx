@@ -107,44 +107,53 @@ class SphericalHarmonics(nn.Module):
         return sh
 
 
-def spherical_harmonics_alpha(lmax: int, alpha: mx.array) -> mx.array:
-    """Spherical harmonics evaluated on the alpha angle.
-    
+def spherical_harmonics_alpha(l: int, alpha: mx.array) -> mx.array:
+    """Compute S^l(alpha), the alpha-dependent factor of real spherical harmonics.
+
+    Matches e3nn’s definition: concatenation of sqrt(2)*sin(m alpha) for m=l..1,
+    followed by 1, then sqrt(2)*cos(m alpha) for m=1..l.
+
     Parameters
     ----------
-    lmax : int
-        maximum degree
+    l : int
+        Degree of spherical harmonics.
     alpha : mx.array
-        tensor of shape ``(...)``
+        Tensor of shape (...,).
 
     Returns
     -------
     mx.array
-        tensor of shape ``(..., 2lmax+1)``
+        Tensor of shape (..., 2l+1).
     """
-    # This is a simplified version - full implementation would include complex exponentials
-    # For now, return real-valued spherical harmonics
-    return mx.stack([mx.cos(alpha * k) for k in range(-lmax, lmax+1)], axis=-1)
+    from ._angular_spherical_harmonics import spherical_harmonics_alpha as _alpha
+    return _alpha(l, alpha)
 
 
 def spherical_harmonics_beta(lmax: int, beta: mx.array) -> mx.array:
-    """Spherical harmonics evaluated on the beta angle.
-    
+    """Compute stacked associated Legendre polynomials up to lmax.
+
+    Returns the beta-dependent factor across degrees 0..lmax, concatenated as
+    [P^0_m(cos beta), P^1_m(cos beta), ..., P^{lmax}_m(cos beta)] with m from -l..l
+    per degree, normalized consistently with e3nn’s real SH convention.
+
     Parameters
     ----------
     lmax : int
-        maximum degree
+        Maximum degree (inclusive).
     beta : mx.array
-        tensor of shape ``(...)``
+        Tensor of shape (...,).
 
     Returns
     -------
     mx.array
-        tensor of shape ``(..., (lmax+1)**2)``
+        Tensor of shape (..., (lmax+1)**2).
     """
-    # This is a placeholder implementation
-    # Full implementation would use associated Legendre polynomials
-    return _spherical_harmonics(lmax, mx.sin(beta), mx.zeros_like(beta), mx.cos(beta))
+    from ._angular_spherical_harmonics import legendre
+
+    y = mx.cos(beta)
+    z = mx.sin(beta)
+    ls = list(range(lmax + 1))
+    return legendre(ls, y, z)
 
 
 def spherical_harmonics(
